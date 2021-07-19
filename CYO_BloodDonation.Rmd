@@ -1,0 +1,1026 @@
+---
+title: "Blood Infusion"
+author: "Manuela Werkle"
+date: "4th July 2021"
+output: pdf_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center", out.width = '75%')
+
+
+# Load necessary packages, if not available
+# Note: this process could take a couple of minutes
+# Note: this script was created considering using R version > 4.0
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(matrixStats)) install.packages("matrixStats", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+if(!require(vcd)) install.packages("vcd", repos = "http://cran.us.r-project.org")
+if(!require(mlbench)) install.packages("mlbench", repos = "http://cran.us.r-project.org")
+if(!require(party)) install.packages("party", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(nnet)) install.packages("nnet", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+if(!require(MLmetrics)) install.packages("MLmetrics", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(data.table)
+library(matrixStats)
+library(lubridate)
+library(knitr)
+library(vcd)
+library(mlbench)
+library(party)
+library(ggplot2)
+library(nnet)
+library(randomForest)
+library(MLmetrics)
+```
+
+## 1. Introduction
+### 1.1 Description of the dataset
+I found this dataset "Blood Transfusion Service Center" on https://archive-beta.ics.uci.edu/ml/datasets/176. It was published 2008 by creator Prof. I-Cheng Yeh with this published paper:
+Yeh, I-Cheng, Yang, King-Jang, and Ting, Tao-Ming, "Knowledge discovery on RFM 
+model using Bernoulli sequence, "Expert Systems with Applications, 2008 
+(doi:10.1016/j.eswa.2008.07.018)
+
+It is licensed under a Creative Commons Attribution 4.0 International (CC BY 4.0) license, which allows for the sharing and adaptation of the datasets for any purpose, provided that the appropriate credit is given.
+Starting the project on 4th July, it had 27 #Views mentioned on the homepage. This agrees with the requirement of using a publicly available dataset which is not well-known or used as example in previous courses. 
+
+The original dataset contains of 748 rows and 5 columns, where I will later change the column names to have it a little bit easier in typing. The columns are:
+
+original column name | my column name | explanation 
+-------------------- | -------------- | ----------- 
+Recency..months. | recency | number of months since the last donation of this person
+Frequency..times. | frequency | total number of donations, which this person made
+Monetary..c.c..blood | monetary | total volume of all donations done by this person in unit "cc"
+Time..months. | time | number of months since first donation of this person
+whether.he.she.donated.blood.in.March.2007 | donation | value, if the person donated blood at this donation day in March 2007 (0 stands for "no" and 1 stands for "yes")
+
+Every row stands for an individual person. Because there's no indicator about these person, the dataset is fully anonymized. 
+
+### 1.2 Summary of the goal of the project and key steps that were performed
+This data set is used for solving a classification problem using machine learning techniques, corresponding models and algorithms. 
+
+The goal of this project is to predict, if the person would come to the next blood donation again. This is done based on a data set, which represents a list of different persons regarding their former blood donations. 
+
+Overall we can say, that the goal of this projects stands for a prediction of a repetition of a customer behavior. So it can be seen as an example for an analysis regarding "Customer Value", where the result can be used as basis of decisionmaking for advertising. 
+
+I will split this dataset into train and test set using 75% / 25% ratio. Normally I would recommend using another ratio to have as much training data as possible, but as the data set is not that big in this case we also need enough data for our final test set. After the splitting we have 599 rows in our train data set and 149 in our test data set. For the training and validation phase we furthermore divide the train set into train and validation set. We use the same ratio 75% / 25% and in the end we then have a train set containing 450 rows and a validation set of 149 rows.
+
+
+```{r creation of train and test sets, include=FALSE}
+# data is downloaded from the website and loaded to a data frame
+dl <- tempfile()
+download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/blood-transfusion/transfusion.data", dl)
+
+# rename, to make sure that data import only starts when download is finished
+file.rename(from = dl, to = "transfusion.csv") 
+transfusion <- read.csv("transfusion.csv", header=TRUE)
+
+# Check after data import, if the data is structured:
+str(transfusion)
+
+# Final test set will be 20% of the dataset
+set.seed(1) 
+df <- transfusion
+partition <- createDataPartition(df[,5], times = 1, p = 0.80, list = FALSE)
+train <- transfusion[partition,]
+test <- transfusion[-partition,]
+
+#rm(dl, df, partition)
+
+```
+After data splitting, I will do some data exploration. This is necessary to have first key insights into the data. Another important step in my report will be the data cleaning and preparation for modeling. For this I will check for unnecessary data / features and on the other hand also create new columns = new features in the data set, which can be used for later analysis.
+
+## 2. Methods and Analysis
+### 2.1 Process and techniques used
+
+First I will explore the data by calculating summary and creating visualizations of the data.
+Based on these points I will identify potential relationships and characteristics of the data. After the data exploration, I will create 5 models to predict, if a person will come to the next blood donation. 
+
+I will use the "No-free-Lunch" theoreme, which means, that it makes no sense to use an algorithm from the past again and again. It makes more sense to use several difference models. In this process it's good to start with several easy models instead of choosing complex ones. Because also easier models can have a good result.
+
+The following 5 models will be used in my project:
+
+1. Decision Trees: Decision Trees can be used for regression and classification. The advantage is, that it's easy to understand and easy to interprete. 
+
+2. Random Forest: Random Forest is a well-known model which can also be used for regression and classification and so it's quite popular. It's a combination of several decision trees and all trees are built in parallel. That's why this model is quite fast. Furthermore it's flexible, easy to understand and comprehensible.
+
+3. Logistic Regression: I will use this model, because it's easy to understand, fast and a typical model used for classification problems.
+
+4. kNN: I will use kNN because it's fast for small data sets and it can be used for both regression and classification. For large data sets it can be quite computating-intensive, because the prediction of new values need a calculate of the distances to all other values. But my data set is not that big, so that should be fine.
+
+5. Neuronal Network: I will use Neuronal Network because it's a really effective model and can be used for nearly all data, also for not linear prediction, regression and classification (=Supervised Learning). Also Clustering is possible (Unsupervised Learning).
+
+
+### 2.2 Data exploration and data visualization
+
+To have a first overview of the data set I will explore the data and create some visualizations to gain some insights. To make reading a little bit easier, I will first change the column names.
+
+```{r change columns names}
+# change the originals columns names to make it easier for typing
+colnames(train) <- c("recency", "total_frequency", "total_monetary","time","donation")
+colnames(test) <- c("recency", "total_frequency", "total_monetary","time","donation")
+
+```
+
+#### 2.2.1 Some general data analysis
+To have a first overview of the data I will create a general overview and then go deeper into the different columns:
+```{r}
+nrow(train) # count rows in train data set
+```
+The train data set has got 599 rows. In addition we can find the following main key values when looking at the summary function:
+
+```{r}
+summary(train) # Shows first summary of train data
+```
+```{r}
+str(train) # Shows all data types of train data
+```
+
+The columns have got different data types. The data types of the columns total_frequency and total_monetary need to be changed to numeric to make calculations (mean, average) possible. Furthermore donation needs to be changed to type factor for later modeling purposes.
+
+```{r corret data types}
+# change data types for the different columns to make calculations and analysis easier
+train <- as.data.frame(train) %>% mutate(total_frequency = as.numeric(total_frequency),
+                                            total_monetary = as.numeric(total_monetary),
+                                            donation = as.factor(donation))
+test <- as.data.frame(test) %>% mutate(total_frequency = as.numeric(total_frequency),
+                                            total_monetary = as.numeric(total_monetary),
+                                            donation = as.factor(donation))
+```
+The new column types look like this:
+```{r}
+str(train)
+str(test)
+```
+
+#### 2.2.2 Correlations and relationships
+I try to identify relationships between different columns, also called features. The following scatterplot matrix is used to compare the features with each other:
+
+```{r}
+panel.hist <- function(x, ...) # scatterplot matrix to compare columns/features
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(usr[1:2], 0, 1.5) )
+  h <- hist(x, plot = FALSE)
+  breaks <- h$breaks; nB <- length(breaks)
+  y <- h$counts; y <- y/max(y)
+  rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
+pairs(train[1:5], main="scattered matrix for train dataset", panel = panel.smooth,
+      cex = 1, pch = 22, bg = "light blue",
+      diag.panel = panel.hist, cex.labels = 1.5, font.labels = 2)
+```
+Based on these plots we see, that there are columns, which seems to be correlated. We can see negative correlation for example between recency and total_frequency, moderate to strong correlations between time and total_frequency and a high correlation for example between frequency and total_monetary. This makes sense because every time you donate the same blood amount (in this case 500), which means that the more you go, the more blood you donate. This  correlation can also be shown creating a correlation matrix:
+```{r}
+cor(train[1:4]) # Show correlation matrix for all numeric features
+```
+The correlation value between total_frequency and monetary is 1. This means both columns are highly correlated and we do not need both. That's why I will now clean this and the column total_monetary will be deleted:
+```{r}
+train[ , c("total_monetary")] <- list(NULL) # delete column total_monetary in train set
+test[ , c("total_monetary")] <- list(NULL) # delete column total_monetary in test set
+```
+We will continue now with a table looking like this. You can see the first six entries as an example:
+```{r}
+head(train) # show first 6 rows of train table
+```
+
+
+Additionally We can also see in the scattered matrix, that we need to normalize some data, because we need to reduce skewness. This will be done later by scaling directly in the modeling function. (I will use `preProc = c("center", "scale")` for this.) 
+
+In the next sections, I will do some visualizations to better understand our data for analysis.
+
+#### 2.2.3 Analysing recency
+
+I will start our data analysis with the recency value (number of months since the last donation of a person):
+```{r}
+train %>%
+  ggplot(aes(x = recency)) +
+  geom_histogram(
+    aes(y = stat(density)),
+    breaks = seq(min(train$recency) - 10, max(train$recency) + 10),
+    colour = "black",
+    fill = "deepskyblue") +
+  geom_function(
+    fun = function(x) dnorm(x, mean(train$recency), sd(train$recency)),
+    xlim = c(min(train$recency) - 10, max(train$recency) + 10),
+    size = 1) +
+  labs(
+    title = "recency",
+    x = "recency = number of months since last donation",
+    y = "probability density"
+  )
+```
+Based on the plot we can see, that there are many people who came regularly within the last year. There are only some outliers on the right side, which I will identify later.
+
+#### 2.2.4 Analysing total_frequency
+
+Next I will check total_frequency (total number of donations, which a person made):
+
+```{r}
+train %>%
+  ggplot(aes(x = total_frequency)) +
+  geom_histogram(
+    aes(y = stat(density)),
+    breaks = seq(min(train$total_frequency) - 10, max(train$total_frequency) + 10),
+    colour = "black",
+    fill = "red") +
+  geom_function(
+    fun = function(x) dnorm(x, mean(train$total_frequency), sd(train$total_frequency)),
+    xlim = c(min(train$total_frequency) - 10, max(train$total_frequency) + 10),
+    size = 1) +
+  labs(
+    title = "frequency",
+    x = "frequency = total number of donations done",
+    y = "probability density"
+  )
+```
+We can see, that there are many people who donated only a few times. The more the number of donations increase, the less people are still donating. You can also see here outliers on the right side. 
+
+#### 2.2.5 Analysing time
+
+Now I will check the time (number of months since first donation of a person):
+```{r}
+train %>%
+  ggplot(aes(x = time)) +
+  geom_histogram(
+    aes(y = stat(density)),
+    breaks = seq(min(train$time) - 10, max(train$time) + 10),
+    colour = "black",
+    fill = "yellow") +
+  geom_function(
+    fun = function(x) dnorm(x, mean(train$time), sd(train$time)),
+    xlim = c(min(train$time) - 10, max(train$time) + 10),
+    size = 1) +
+  labs(
+    title = "time",
+    x = "time = number of months since first dondation",
+    y = "probability density"
+  )
+```
+Also here you can see that most of the people do not donate since a very long time. The number of months since first donation shows us when the people donated the first time. The max. value here is:
+```{r}
+max(train$time)
+```
+This means the first people started donating blood 98 months ago.
+
+
+#### 2.2.6 Analysing total_frequency vs. time
+
+I will now compare the total number of donations versus the number of months since first donatio:.
+```{r}
+ggplot(train) +
+  geom_point(aes(x = total_frequency, y = time),
+             size = 1) +
+  labs(title = "total_frequency vs. time",
+       x = "total number of donations",
+       y = "number of months since first donation") +
+  theme_linedraw() +
+  theme(axis.line.x = element_line(size = 2))
+
+```
+Based on this plot we see that there are many people coming quite often after they started donating the first time. We can calculate a donation rate to see if a person comes in short or larger time intervals:
+donation rate = total number of donations / number of months since first donation.
+I will add this information as a new column at a later stage.
+
+
+#### 2.2.7 Analysing recency vs. total_frequency
+
+I will compare now the number of months since last donation with the total number of donations:
+
+```{r}
+ggplot(train) +
+  geom_point(aes(x = recency, y = total_frequency),
+             size = 2) +
+  labs(title = "recency vs. total_frequency",
+       x = "number of months since last donation",
+       y = "total number of donations") +
+  theme_linedraw() +
+  theme(axis.line.x = element_line(size = 2))
+```
+We can identify here, if a persons comes periodically. We can calculate this "faithfulness":  
+faithfullness = number of months since last donation / total number of donations.
+I will also add this information as a new column at a later stage.
+
+
+#### 2.2.8 Analysing recency vs. time
+
+Next I will compare the number of months since last donation versus the number of months since first donation:
+
+```{r}
+ggplot(train) +
+  geom_point(aes(x = recency, y = time),
+             size = 2) +
+  geom_line(aes(x = time, y = time),
+            color = "green",
+            size = 1)+
+  labs(title = "recency vs. time",
+       x = "number of months since last donation",
+       y = "number of months since first donation") +
+  theme_linedraw() +
+  theme(axis.line.x = element_line(size = 2))
+```
+We can see here, if a person perhaps stops coming to donations. People who only came once can be found on the green line here where both values are the same. We can also calculate this as an value:
+churn_rate = number of months since last donation & number of months since first donation.
+I will also add this information as a new column at a later stage.
+
+#### 2.2.9 Analysing donation
+
+If we check the donating results in the train data set, we can see that there are more people who did not donate compared to those, who donated:
+```{r}
+summary(train$donation)
+```
+
+### 2.3 Data Cleaning
+
+If we look at the data set, we recognize, that we need to clean some data. 
+
+#### 2.3.1 Check if data in train and test set are from the same population
+
+For a good and reliable modeling result it's important to have data in train and test set which is from the same population. This means that we need to check variance and also look for extreme values. We will do a visual check using boxplots for both data sets train and test. I normalized the date to have a better overview and comparison:
+```{r population check, figures-side, fig.show="hold", out.width="49%", fig.align = "left"}
+# definition of a normalization function
+norm <- function(x){
+            return((x-min(x)) / (max(x) - min(x)))
+}
+
+#apply norm function to columns 1-3 in the train and test data set
+train_norm <- as.data.frame(lapply(train[1:3], norm))
+test_norm <- as.data.frame(lapply(test[1:3], norm))
+
+# plot the overview based on norm function
+boxplot(train_norm, 
+        main="train", 
+        notch=TRUE, 
+        na.action=NULL, 
+        drop=FALSE, 
+        lex.order=FALSE)
+boxplot(test_norm, 
+        main="test", 
+        notch=TRUE, 
+        na.action=NULL, 
+        drop=FALSE, 
+        lex.order=FALSE)
+
+rm(train_norm, test_norm) # remove again to clear workspace
+```
+Based on the plot we see that both data sets seems to be similar and so we can assume that they are indeed from the same population. 
+
+#### 2.3.2 Outlier detection - check for extreme values
+
+In above boxplots we saw that there might be some extreme values. Extreme values can have a negative influence in the modeling process. That's why we need to recognize them in the train data set.
+```{r}
+# Check outliers recency
+boxplot.stats(train$recency)$out # check for outliers in recency columns
+
+# Check outliers total_frequency
+boxplot.stats(train$total_frequency)$out # check for outliers in total_frequency columns
+
+# Check outliers time
+boxplot.stats(train$time)$out # check for outliers in time columns
+```
+
+I can identify some outliers in the data set, but to my point of view these are real data. There's no indication, that it's a kind of typing error or mistake. That's why I will leave them in. 
+
+
+#### 2.3.3 Check for duplicates
+
+For good data quality it's also necessary to check, if there are duplicate values. If so, they should be removed.
+
+```{r}
+nrow(train) # shows amount of all rows in train set
+nrow(distinct(train)) # shows amount of all distinct rows in train set
+```
+We can see, that there are 155 duplicate rows, which would normally be removed in the train set using this code
+```{r}
+#train <- distinct(train) # take all distinct values and save them back in train
+```
+BUT: The data set contains of different entries where one row stands for one single person. It can of course happen that coincidentally two people have the same values. That's the reason why I will also let these values in and I won't delete them.
+
+### 2.4 Insights based on the data exploration
+
+1. Checking all the columns from the source file, we saw that not all features are relevant. Total_monetary and total_frequency were highly correlated and indicating the same behavior: If somebody goes to a donation more often he/she will also have collected more blood in total. That's why I removed total_monetary from my table. 
+
+2. There are no high differences in the variables (scalability).
+
+3. There's no missing data, so we do not need to think about imputation.
+
+4. There are some outliers where we can see a deviation from the other data. But they are seen as real data and so they won't be removed. 
+
+5. There were some duplicate values in our train data set which could be removed to have a more clean data set. But as these are individual persons for each row, I will let them in the data set.
+
+6. Regarding the column 'donation' we can see a big difference between people who are donating (value = 1) and people who are not donating (value = 0). The amount of people who are not donating is almost 4 times as high.
+
+7. Some variables have got skewed distributions, for example recency.
+
+8. The smallest value (besides 0) for the amount of months since last donation is 1. This means, that the donations are most probably done on a monthly basis.
+
+9. Some values have a high variance. So we need to normalize them for our calculations..
+
+
+### 2.5 Final data check
+
+Before starting modelling I will check, if there are any NA's in our table:
+```{r}
+anyNA(train) # Check for NA's in train data set
+anyNA(test) # Check for NA's in test data set
+```
+The result is FALSE, which means, that all values are complete. 
+
+
+## 3 Modeling approach
+
+For modeling it's necessary to prepare the data set. First I will divide the train data set into a train and validation data set. This is necessary to have an independent test data set for final prediction and to avoid overfitting. Models will be trained based on the train data set and the prediction check will be done on the validation data set. The test set will only be used for getting final results. 
+
+As metric I choose logLoss, which is a classificaton metric based on probabilities and its objective is minimization. 
+
+Afterwards I will choose several models for a first evaluation, compare the results and try to optimize them by using several optimization techniques. The models here are Decision Trees, Random Forest, Logistic Regression (GLM), k-nearest neighbor (kNN) and Neuronal Network.
+
+
+### 3.1 Preparation for modeling
+
+Using the caret package, I will now test several models to compare and check the results based on the "No-free-Lunch" theoreme. This means, that the result of solving a problem is statistically identical, although using different kinds of methods. Because of that, I will compare some models first and then choose models for further optimization and the final solution.
+```{r}
+# I will change the factor value: "0 -> no", "1 -> yes" to make it more clear and to 
+# avoid mistakes by confusion of data
+# change levels of factors from 0 to "no" and 1 to "yes" for later usage in kNN
+levels(train$donation) <- c("no", "yes") 
+levels(test$donation) <- c("no", "yes")
+
+# Caret library is used for data splitting. I choose a ratio of 75% / 25% to 
+# have enough train data
+set.seed(1)
+df <- train
+partition <- createDataPartition(df[,1], times = 1, p = 0.75, list = FALSE)
+train <- df[partition,] # Create the training sample
+validation = df[-partition,] # Create the test sample
+rm(df, partition) # remove temporary variables to clear cache
+```
+The train data set will be used for training and the validation data set for the comparison checks of the modeling results.
+
+I will use crossvalidation in my training process, because this is a great possibility to tune the hyper parameter of a give algorithm. I will use 10 folds and 4 repeats, because the data set is not very big:
+```{r}
+# 10 fold crossvalidation with 4 repeats are used for my models
+crossvalidation <- trainControl(method = "repeatedcv", 
+                                number = 10,
+                                repeats = 4,
+                                classProbs = TRUE, 
+                                summaryFunction = mnLogLoss)
+```
+In the next sections I will start modelling with crossvalidation, but without any further optimization so far.
+
+#### 3.2 Modeling: Decision Trees
+
+Decision Trees give us the possibility of visualization. It's easy to understand. Here is the plot for our train data:
+```{r Decision Tree}
+# Decision Tree plotting using tree
+set.seed(1)
+model.decisiontree = ctree(donation ~ ., data = train)
+plot(model.decisiontree)
+```
+The resulting criteria in the end is first checked by recency. If this value is higher or lower than 6 further checks are done as shown in the plot.
+
+From now on, I will use the caret package for all further modeling approaches:
+```{r}
+# Decision tree using caret package
+set.seed(1)
+model.tree = train(donation ~ ., # Create Decision Tree with LogLoss based on Caret
+                  data = train, 
+                  method = "rpart", 
+                  metric = "logLoss",
+                  maximize = FALSE,
+                  trControl = crossvalidation)
+score = predict(model.tree, newdata = validation)
+conf_matrix = confusionMatrix(score,validation$donation)
+ll = min(model.tree$results$logLoss)
+
+# create result table to collect all accuracy values from the different models
+modeling_results <- tibble(method = "Decision Tree",
+                           logLoss = ll, 
+                           Accuracy = conf_matrix$overall['Accuracy'])
+```
+Unfortunately Decision Trees are often only a quite weak model. If the data set changes a little bit, then the whole tree would look in another way.
+
+#### 3.3 Modeling: Random Forest
+
+```{r Random Forest, message=FALSE, results='hide'}
+set.seed(1)
+model.rf <- train(donation ~ ., 
+                   data = train,
+                   method = "rf",
+                   metric = "logLoss",
+                   maximize = FALSE,
+                   trControl = crossvalidation)
+score <- predict(model.rf, newdata = validation)
+ll = min(model.rf$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                          tibble(method = "Random Forest",
+                              logLoss = ll, 
+                              Accuracy = conf_matrix$overall['Accuracy']))
+```
+
+### 3.4 Modeling: Logistic Regression
+
+```{r Logistic Regression}
+set.seed(1)
+model.LogReg <- train(donation~.,
+                     data=train,
+                     method="glm",
+                     family=binomial,
+                     metric = "logLoss",
+                     maximize = FALSE,
+                     trControl = crossvalidation) 
+score <- predict(model.LogReg, newdata = validation)
+ll = min(model.LogReg$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results,  # add to result overview
+                          tibble(method = "Logistic Regression",
+                          logLoss = ll, 
+                          Accuracy = conf_matrix$overall['Accuracy']))
+```
+
+#### 3.5 Modeling: kNN
+
+```{r kNN}
+set.seed(1)
+model.knn <- train(donation ~ ., 
+                   data = train,
+                   method = "knn",
+                   metric = "logLoss",
+                   maximize = FALSE,
+                   trControl = crossvalidation)
+score <- predict(model.knn, newdata = validation)
+ll = min(model.knn$results$logLoss)
+conf_matrix <- confusionMatrix(score, validation$donation) # Check accuracy with validation set
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "kNN",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+```
+kNN is unfortunately computation-intensive for large data-sets. But my data set is not that big.
+
+
+### 3.6 Modeling: Neuronal Network
+
+When using nnet model it's important to scale the data before. That's why I will use "PreProc" for scaling parameter here:
+
+```{r Neuronal Network, message=FALSE, results='hide'}
+set.seed(1)
+model.nnet <- train(donation~.,
+                    data=train, 
+                    method="nnet", 
+                    metric="logLoss",
+                    maximize = FALSE,
+                    preProc=c("center","scale"), # for nnet values should always be scaled
+                    trControl = crossvalidation)
+score <- predict(model.nnet, newdata = validation)
+ll = min(model.nnet$results$logLoss)
+conf_matrix <- confusionMatrix(score, validation$donation) # Check accuracy with validation set
+
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Neuronal Network",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+```
+The training of this model can be computation-intensive. In addition this model can't be easy interpreted. Because it has many parameters so it can also easily lead to overfitting when using many of them.
+
+### 3.7 Overview of different model results
+
+Here you can see the result of the first modeling process:
+```{r}
+knitr::kable(modeling_results, caption = "modeling results")
+```
+The results don't look bad, but I will now try to improve them. First I will try to optimize the models by adding new features / columns.
+
+
+### 3.8 Optimizing modeling results
+
+#### 3.8.1 Optimizing features
+
+To have more features and possibilities to use in my models, I will create new columns to have more insights:
+
+I will add a column for the donation rate = total number of donations divided through number of months since fist donation. If this value is near 1, it means that the person is likely to come more often:
+```{r}
+# add a new column for donation rate into train data set
+train <- mutate(train, don_rate = total_frequency / time)
+```
+
+I will add a column for faithfulness = number of months since last donation divided through total number of donations. If this number is small, it shows that this person did a lot of donations in the last time:
+```{r}
+# add a new column for faithfulness into train data set
+train <- mutate(train, faith = recency / total_frequency)
+```
+
+I will add a column for churn_rate = number of months since last donation divided through number of months since firs donation. If this value is closed to 1, it shows that this person has perhaps stopped with blood donation: 
+```{r}
+# add new column for people, who probably won't come back again
+train <- mutate(train, churn_rate = recency / time)
+
+# move donation column to the last column
+train <- train %>% select(-donation,donation)
+
+# check correlation of the new columns
+cor(train[1:6])
+```
+
+I checked the correlations again to make sure, that I did not create highly correlated values. But that's fine and  I can continue to add them also to my validation and test set:
+```{r}
+# add all three new columns above also into our train and validation data set
+test <- mutate(test, don_rate = total_frequency / time,
+               faith = recency / total_frequency,
+               churn_rate = recency / time)
+validation <- mutate(validation, don_rate = total_frequency / time,
+                     faith = recency / total_frequency,
+                     churn_rate = recency / time)
+```
+
+I will now run my models again, based on the new added columns:
+```{r, message=FALSE, results='hide'}
+# Decision Tree
+set.seed(1)
+model.tree_opt_f = train(donation ~ ., # Create Decision Tree with LogLoss based on Caret
+                   data = train, 
+                   method = "rpart", 
+                   metric = "logLoss",
+                   maximize = FALSE,
+                   trControl = crossvalidation)
+score = predict(model.tree_opt_f, newdata = validation)
+ll = min(model.tree_opt_f$results$logLoss)
+conf_matrix = confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Decision Tree Caret optimized by new features",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Random Forest
+set.seed(1)
+model.rf_opt_f <- train(donation ~ ., 
+                  data = train,
+                  method = "rf",
+                  metric = "logLoss",
+                  maximize = FALSE,
+                  trControl = crossvalidation)
+score <- predict(model.rf_opt_f, newdata = validation)
+ll = min(model.rf_opt_f$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Random Forest optimized by new features",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Logistic Regression
+set.seed(1)
+model.LogReg_opt_f <- train(donation~.,
+                      data=train,
+                      method="glm",
+                      family=binomial,
+                      metric = "logLoss",
+                      maximize = FALSE,
+                      trControl = crossvalidation) 
+score <- predict(model.LogReg_opt_f, newdata = validation)
+ll = min(model.LogReg_opt_f$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results,  # add to result overview
+                              tibble(method = "Logistic Regression optimized by new features",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Modeling: kNN
+set.seed(1)
+model.knn_opt_f <- train(donation ~ ., 
+                   data = train,
+                   method = "knn",
+                   metric = "logLoss",
+                   maximize = FALSE,
+                   trControl = crossvalidation)
+score <- predict(model.knn_opt_f, newdata = validation)
+ll = min(model.knn_opt_f$results$logLoss)
+conf_matrix <- confusionMatrix(score, validation$donation) # Check accuracy with validation set
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "kNN optimized by new features",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Modeling: Neuronal Network
+set.seed(1)
+model.nnet_opt_f <- train(donation~.,
+                    data=train, 
+                    method="nnet", 
+                    metric="logLoss",
+                    maximize = FALSE,
+                    preProc=c("center","scale"), # for nnet values should always be scaled
+                    trControl = crossvalidation)
+score <- predict(model.nnet_opt_f, newdata = validation)
+ll = min(model.nnet_opt_f$results$logLoss)
+conf_matrix <- confusionMatrix(score, validation$donation) # Check accuracy with validation set
+
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Neuronal Network optimized by new features",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+```
+This is my result after feature optimization:
+```{r}
+knitr::kable(modeling_results, caption = "modeling results")
+```
+
+#### 3.8.2 Optimizing with TuneGrid
+
+Next  I will prepare tuneGrid. TuneGrid is used to check different possible parameter combination during the modelling process. I will use different TuneGrids adapted to the corresponding models:
+```{r, message=FALSE, results='hide'}
+# Decision Tree
+set.seed(1)
+tunegrid_dc <- expand.grid(cp=.2) # I will use 1 to 30 here to make it not too big
+model.tree_opt_tg = train(donation ~ ., # Create Decision Tree with LogLoss based on Caret
+                         data = train, 
+                         method = "rpart", 
+                         metric = "logLoss",
+                         maximize = FALSE,
+                         trControl = crossvalidation,
+                         tuneGrid = tunegrid_dc)
+score = predict(model.tree_opt_tg, newdata = validation)
+ll = min(model.tree_opt_tg$results$logLoss)
+conf_matrix = confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Decision Tree Caret optimized by TuneGrid",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Random Forest
+tunegrid_rf <- expand.grid(mtry=2) # 1 would be less and >5 more complex, I choose middle
+set.seed(1)
+model.rf_opt_tg <- train(donation ~ ., 
+                        data = train,
+                        method = "rf",
+                        metric = "logLoss",
+                        maximize = FALSE,
+                        trControl = crossvalidation,
+                        tuneGrid = tunegrid_rf)
+score <- predict(model.rf_opt_tg, newdata = validation)
+ll = min(model.rf_opt_tg$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Random Forest optimized by TuneGrid",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Logistic Regression
+set.seed(1)
+tunegrid_logreg <- expand.grid(parameter=2)
+model.LogReg_opt_tg <- train(donation~.,
+                            data=train,
+                            method="glm",
+                            family=binomial,
+                            metric = "logLoss",
+                            maximize = FALSE,
+                            trControl = crossvalidation,
+                            tuneGrid = tunegrid_logreg) 
+score <- predict(model.LogReg_opt_tg, newdata = validation)
+ll = min(model.LogReg_opt_tg$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results,  # add to result overview
+                              tibble(method = "Logistic Regression optimized by TuneGrid",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Modeling: kNN
+set.seed(1)
+tunegrid_knn <- expand.grid(k=c(1:30))
+model.knn_opt_tg <- train(donation ~ ., 
+                         data = train,
+                         method = "knn",
+                         metric = "logLoss",
+                         maximize = FALSE,
+                         trControl = crossvalidation,
+                         tuneGrid = tunegrid_knn)
+score <- predict(model.knn_opt_tg, newdata = validation)
+ll = min(model.knn_opt_tg$results$logLoss)
+conf_matrix <- confusionMatrix(score, validation$donation) # Check accuracy with validation set
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "kNN optimized by TuneGrid",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Modeling: Neuronal Network
+set.seed(1)
+tunegrid_nnet = expand.grid(size=c(3:5), decay=c(0.1,0.5))
+model.nnet_opt_tg <- train(donation~.,
+                          data=train, 
+                          method="nnet", 
+                          metric="logLoss",
+                          maximize = FALSE,
+                          preProc=c("center","scale"), # for nnet values should always be scaled
+                          trControl = crossvalidation,
+                          tuneGrid = tunegrid_nnet)
+score <- predict(model.nnet_opt_tg, newdata = validation)
+ll = min(model.nnet_opt_tg$results$logLoss)
+conf_matrix <- confusionMatrix(score, validation$donation) # Check accuracy with validation set
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Neuronal Network optimized by TuneGrid",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+```
+This is my result after feature and TuneGrid optimization:
+```{r}
+knitr::kable(modeling_results, caption = "modeling results")
+```
+
+
+#### 3.8.4 Optimizing using scaling
+
+The summary of our new train table will look like this:
+```{r}
+summary(train)
+```
+We can see in this summary output, that the numerical features have different units (months, time) and different scales. So we need to normalize the data. Otherwise the algorithm will be dominated by the feature with the larger scale and so affect the model performance. I will use the parameter preProcess in the train function to correct this.
+
+For NNET this parameter has already been set. I will now add it to the other 4 models too:
+
+```{r, message=FALSE, results='hide'}
+# Decision Tree
+set.seed(1)
+tunegrid_dc <- expand.grid(cp=.2) # I will use 1 to 30 here to make it not too big
+model.tree_opt_tgs = train(donation ~ ., # Create Decision Tree with LogLoss based on Caret
+                          data = train, 
+                          method = "rpart", 
+                          metric = "logLoss",
+                          maximize = FALSE,
+                          trControl = crossvalidation,
+                          tuneGrid = tunegrid_dc,
+                          preProc = c("center","scale"))
+score = predict(model.tree_opt_tgs, newdata = validation)
+ll = min(model.tree_opt_tgs$results$logLoss)
+conf_matrix = confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Decision Tree Caret optimized by TuneGrid and scaling",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Random Forest
+tunegrid_rf <- expand.grid(mtry=2) # 1 would be less and >5 more complex, I choose middle
+set.seed(1)
+model.rf_opt_tgs <- train(donation ~ ., 
+                         data = train,
+                         method = "rf",
+                         metric = "logLoss",
+                         maximize = FALSE,
+                         trControl = crossvalidation,
+                         tuneGrid = tunegrid_rf,
+                         preProc = c("center","scale"))
+score <- predict(model.rf_opt_tgs, newdata = validation)
+ll = min(model.rf_opt_tgs$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "Random Forest optimized by TuneGrid and scaling",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Logistic Regression
+set.seed(1)
+tunegrid_logreg <- expand.grid(parameter=2)
+model.LogReg_opt_tgs <- train(donation~.,
+                             data=train,
+                             method="glm",
+                             family=binomial,
+                             metric = "logLoss",
+                             maximize = FALSE,
+                             trControl = crossvalidation,
+                             tuneGrid = tunegrid_logreg,
+                             preProc = c("center","scale")) 
+score <- predict(model.LogReg_opt_tgs, newdata = validation)
+ll = min(model.LogReg_opt_tgs$results$logLoss)
+conf_matrix <- confusionMatrix(score,validation$donation)
+modeling_results <- bind_rows(modeling_results,  # add to result overview
+                              tibble(method = "Logistic Regression optimized by TuneGrid and scaling",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+
+# Modeling: kNN
+set.seed(1)
+tunegrid_knn <- expand.grid(k=c(1:30))
+model.knn_opt_tgs <- train(donation ~ ., 
+                          data = train,
+                          method = "knn",
+                          metric = "logLoss",
+                          maximize = FALSE,
+                          trControl = crossvalidation,
+                          tuneGrid = tunegrid_knn,
+                          preProc = c("center","scale"))
+score <- predict(model.knn_opt_tgs, newdata = validation)
+ll = min(model.knn_opt_tgs$results$logLoss)
+conf_matrix <- confusionMatrix(score, validation$donation) # Check accuracy with validation set
+modeling_results <- bind_rows(modeling_results, # add to result overview
+                              tibble(method = "kNN optimized by TuneGrid and scaling",
+                                     logLoss = ll, 
+                                     Accuracy = conf_matrix$overall['Accuracy']))
+```
+
+## 4. Results
+
+### 4.1 Presentation of modeling results
+
+This is my final modeling result:
+```{r}
+# Show results based on logLoss value (desc sorting)
+modeling_results %>% arrange(modeling_results$logLoss)
+
+# Show results based on Accuracy value (asc sorting)
+modeling_results %>% arrange(desc(modeling_results$Accuracy))
+```
+
+Looking at the models above, we see that we received the lowest logLoss for the Neuronal Network model with feature and TuneGrid optimization. And the model with the highest accuracy it the Neuronal Network model without optimization. 
+
+Let's create an overview for logLoss:
+
+```{r, fig.align = "center", out.width = '120%'}
+# collect the results using resamples function into one plot
+results <- resamples(list(Decision_Tree = model.tree,
+                          Random_Forest = model.rf,
+                          kNN = model.knn,
+                          LogRegression = model.LogReg, 
+                          Neuronal_Net = model.nnet,
+                          Decision_Tree_feature_optimized = model.tree_opt_f,
+                          Random_Forest_feature_opt = model.rf_opt_f,
+                          kNN_feature_opt = model.knn_opt_f,
+                          LogRegression_feature_opt = model.LogReg_opt_f, 
+                          Neuronal_Net_feature_opt = model.nnet_opt_f,
+                          Decision_Tree_tunegrid = model.tree_opt_tg,
+                          Random_Forest_tunegrid = model.rf_opt_tg,
+                          kNN_tunegrid = model.knn_opt_tg,
+                          LogRegression_tunegrid = model.LogReg_opt_tg, 
+                          Neuronal_Net_tunegrid = model.nnet_opt_tg,
+                          Decision_Tree_feature_tunegrid_scaling = model.tree_opt_tgs,
+                          Random_Forest_feature_tunegrid_scaling = model.rf_opt_tgs,
+                          kNN_feature_tunegrid_scaling = model.knn_opt_tgs,
+                          LogRegression_tunegrid_scaling = model.LogReg_opt_tgs))
+# show summary of the results 
+summary(results)
+
+# create a dot plot and a bwplot to visually see the results
+bwplot(results)
+```
+We see that the ranges are quite near together but there are some models with a higher variance and some outliers to the right side.
+
+### 4.2 Discussion of the model performance
+
+According to the "No-free-Lunch" theoreme there are several ways to improve an algorithm. Every algorithm has it advantages and disadvantages and many different hyper parameters for tuning. I've used the Resamples function to compare the different model performances regarding logLoss. Using metric logLoss we are interested in minimizing the value here, because it measures uncertainty and so a low logLoss means a low uncertainty of the model. Compared to Accuracy the main focus is on classes in the output like we can see it in the data here.
+The disadvantage of logLoss is, that it's not easy to interpret and we need other values to check, if a performance is better or not.
+
+Another good performance indicator is the Confusion Matrix. If we check the Confusion Matrix for example for our model with the lowest logLoss, we see that the Accuracy is also quite good. Accuracy means: How often the classifier correct. Important for us in this classification model is the TN rate (true negative), which can be seen in the Confusion Matrix: 
+
+```{r}
+# show Confusion Matrix for our Neuronal Network with feature and TuneGrid optimization
+confusionMatrix(predict(model.nnet_opt_tg, newdata = validation), validation$donation) 
+```
+
+It's 85 in this case using this model above. Because we need to know, who would not come to the next blood donation to find possibilities to tout them. This can be tranferred to marketing advertising and customer behaviour analysis; There the companies are also interested who would not come back to buy things during the next time to actively create for example personalized discounts for them.
+
+
+### 4.3 Use final model on final test data set
+
+As a final test, we can now use my so far untouched test data set to check the model:
+```{r}
+score <- predict(model.nnet_opt_tg, newdata = test)
+confusionMatrix(score, test$donation) # Check accuracy with validation set
+```
+The accuracy here is 0.7986 which is not as good as in den validation data set, but also a good value, because nearly 80% of the prediction is correct. 
+
+## 5. Conclusion
+
+### 5.1 Brief summary of the report
+
+We can use former data to analyse future behavior. But as behaviour is human, we can never be 100% sure. 
+
+I know that there's a minimum time range between two donations where a person is not allowed to donate.
+So it's not possible that a person come in a very short time frame again. In addition, different impairments to health can have an influence, that a person is not allowed to go (for example if sb. is sick). Further effects of preventing sb. to continue going to donations are heart issues, because people who have problems with the heart (for example a former heart attack) are not allowed anymore to do blood donations.
+
+### 5.2 Potential impact of the report
+
+This analysis is a typical example of a marketing analysis. People with 0 could be "bothered" with advertising / discounts until they come back. 
+
+### 5.3 Limitations of the report
+
+I chose a data set, which is not that big to make sure that all analysis are working on my old laptop. You always need to make sure to have "real" and valid data, because a report is only as good as the data quality. So if you start with a bad data set or data quality, it's harder to create a good model. That's why it's important to have as much data as possible. So you have more possibilities in your modeling process. 
+
+
+### 5.4 Future work
+
+In regards to the grading rubric it was only necessary to use at least two different models or algorithms with at least one being more advanced than linear or logistic regression. I used 5 for my report here, but I was also limited a little bit regarding computer performance. With the possibility of more RAM on the laptop and more time to do further analysis it would be interesting to use further models or column combinations to improve the results. 
+
+It would also be interesting to compare based on other performance measurements, for example F1 score which is the harmonic mean of precision and recall. Also AUC would be an interesting possibility to summary the performances of the models. Based on that it would be possible to use ROC curve to visualize the performace of binary classifiers.
+
+
+```{r clear temp table, include=FALSE}
+# clear tables to save space
+rm(list=ls()) # clear everything from environment
+```
+
